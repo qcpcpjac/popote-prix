@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="popote-version" content="5"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="popote-version" content="6"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>La Popote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -369,7 +369,8 @@ function errText(e){ switch(e?.code){
   case "not_granted": return "Tu as refusé l'accès à Claude pour cette page. Recharge-la pour accepter.";
   case "sampling_disabled": return "Claude n'est pas disponible pour ce compte.";
   case "rate_limited": return "Limite d'utilisation atteinte. Réessaie dans quelques minutes.";
-  case "invalid_json": return "La réponse de Claude était incomplète. Réessaie (ou réduis le nombre de repas).";
+  case "invalid_json": return "La réponse de Claude était mal formée. Réessaie.";
+  case "too_long": return "La réponse de Claude était trop longue et a été coupée. Réduis le nombre de jours ou de repas dans Réglages, puis réessaie.";
   case "session_expired": return "Ta session a expiré. Reconnecte-toi à Claude.";
   case "cancelled": return "";
   case "no_key": return "Ajoute ta clé API Claude dans Réglages.";
@@ -410,21 +411,21 @@ async function generateWeek(){
   if(!cfg().apiKey){ ui.err = errText({code:"no_key"}); renderBanner(); return; }
   window.scrollTo({top:0,behavior:"smooth"});
   const s = state.settings, pantry = pantryLines();
-  const prompt = `Tu planifies les repas de la semaine et la liste d'épicerie d'un ménage.
+  const prompt = `Tu planifies les repas de la semaine d'un ménage (la liste d'épicerie sera faite dans une étape séparée).
 ${profileText(s)}
 Garde-manger (déjà à la maison : utilise-les en priorité et NE les mets PAS dans la liste d'épicerie) : ${pantry.join(", ")||"rien"}.
 ${specialsText()}
 ${RULES}
-La liste d'épicerie regroupe les quantités de tous les repas (un article une seule fois).
+Sois concis : ingrédients avec quantités pour le nombre de portions, étapes courtes.
 Réponds uniquement avec un objet JSON :
-{"resume":"une phrase qui décrit la semaine","meals":[${MEAL_SHAPE}],"groceries":[${GROC_SHAPE}],"pantry_used":["riz"]}`;
+{"resume":"une phrase qui décrit la semaine","meals":[${MEAL_SHAPE}]}`;
   const ok = await run("Claude prépare ta semaine", prompt, data => {
-    if(!Array.isArray(data?.meals)||!Array.isArray(data?.groceries)) throw {code:"invalid_json"};
-    state.plan = {resume:String(data.resume||""), meals:cleanMeals(data.meals), groceries:cleanGroc(data.groceries), pantry_used:(data.pantry_used||[]).map(String), generatedAt:Date.now()};
+    if(!Array.isArray(data?.meals)||!data.meals.length) throw {code:"invalid_json"};
+    state.plan = {resume:String(data.resume||""), meals:cleanMeals(data.meals), groceries:[], pantry_used:[], generatedAt:Date.now()};
     state.checked = {}; ui.open = {};
-    toast("Nouvelle semaine prête"); location.hash = "#menu";
+    toast("Menu prêt, préparation de la liste d'épicerie…"); location.hash = "#menu";
   });
-  if(ok) await priceList();
+  if(ok) await rebuildGroceries(false);
 }
 async function replaceMeal(m, wish){
   if(!sample||busy) return;
@@ -756,7 +757,7 @@ async function callClaude(messages, tools, signal, onText){
   try{
     r = await fetch("https://api.anthropic.com/v1/messages", {method:"POST", signal,
       headers:{"content-type":"application/json","x-api-key":c.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body: JSON.stringify({model:c.model||DEFAULT_CFG.model, max_tokens:16000, stream:true, messages,
+      body: JSON.stringify({model:c.model||DEFAULT_CFG.model, max_tokens:32000, stream:true, messages,
         ...(tools?.length?{tools:tools.map(t=>({name:t.name, description:t.description, input_schema:t.inputSchema||{type:"object",properties:{}}}))}:{})})});
   }catch(e){ throw e?.name==="AbortError" ? {code:"cancelled"} : {code:"network"}; }
   if(!r.ok){
@@ -811,7 +812,7 @@ const sampleNative = {
         continue;
       }
       const text = res.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
-      if(res.stop_reason === "max_tokens") throw {code:"invalid_json", text};
+      if(res.stop_reason === "max_tokens") throw {code:"too_long", text};
       return parseJSONLoose(text);
     }
     throw {code:"upstream_error"};
