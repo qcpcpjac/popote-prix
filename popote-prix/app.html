@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="popote-version" content="4"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="popote-version" content="5"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>La Popote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -90,6 +90,10 @@ nav.tabs a .n{font-family:var(--f-mono);font-size:12px;opacity:.75;margin-left:4
 a{color:var(--accent);font-weight:600}
 .links{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px}
 :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.nutri{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.nutri>div{background:var(--sunk);border-radius:8px;padding:7px 8px;display:grid}
+.nutri b{font-family:var(--f-mono);font-weight:500;font-size:15px}
+.nutri span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .credit-ph{position:absolute;right:8px;bottom:6px;font-size:10px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .credit{font-size:12px;color:var(--muted);text-align:center}
 .meal>summary::-webkit-details-marker{display:none}
@@ -238,7 +242,7 @@ async function fillImg(i){
   if(m && /^restes/i.test(m.name)) m = state.plan.meals.find(x=>x.type==="souper" && x.day===m.day-1) || null;
   const hero = i.closest(".hero-img");
   if(m && navigator.onLine && m.en){
-    if(m.photo===undefined || m.pv!==PHOTO_V) await fetchMealPhoto(m);
+    await fetchMealPhoto(m);
     if(m.photo){
       i.onerror = ()=>{ i.onerror = null; i.removeAttribute("src"); if(hero) hero.hidden = true; else localImg(i); };
       i.src = m.photo;
@@ -391,10 +395,12 @@ function profileText(s){
     s.meals.diner && s.leftovers && `Les dîners du lundi au vendredi peuvent être les restes du souper de la veille : dans ce cas, nomme-le "Restes : <plat>", cost 0, ingredients et steps vides, et augmente les portions du souper en conséquence.`,
   ].filter(Boolean).join("\n");
 }
-const MEAL_SHAPE = `{"day":0,"type":"souper","name":"Nom du plat","en":"English dish name, e.g. chicken stir fry","cat":"Chicken|Beef|Pork|Seafood|Pasta|Vegetarian|Breakfast","time":30,"cost":9.5,"ingredients":["400 g de poulet", "..."],"steps":["Étape courte", "..."]}`;
+const MEAL_SHAPE = `{"day":0,"type":"souper","name":"Nom du plat","en":"English dish name, e.g. chicken stir fry","cat":"Chicken|Beef|Pork|Seafood|Pasta|Vegetarian|Breakfast","time":30,"cost":9.5,"ingredients":["400 g de poulet", "..."],"steps":["Étape courte", "..."],"nutrition":{"kcal":550,"proteines":35,"glucides":50,"lipides":20,"gras_sat":6,"sucres":8,"fibres":6,"sodium":800}}`;
+const NUTRI_RULE = `"nutrition" = valeurs nutritives estimées pour UNE portion (kcal; grammes pour protéines, glucides, lipides, gras_sat, sucres, fibres; sodium en mg), calculées à partir des quantités d'ingrédients divisées par le nombre de portions. Pour un repas "Restes", mets la même nutrition qu'une portion du plat d'origine.`;
 const GROC_SHAPE = `{"item":"Poitrines de poulet","en":"chicken breast","qty":"1 kg","aisle":"Viandes","store":"Maxi","price":12.99}`;
 const RULES = `Prix : estimations réalistes en épicerie au Québec (fin 2026), en dollars canadiens, pour le format réellement vendu en magasin. "cost" d'un repas = coût approximatif des ingrédients utilisés.
 "type" est "dejeuner", "diner" ou "souper". "aisle" est exactement une de : ${AISLES.join(" | ")}.
+${NUTRI_RULE}
 Recettes simples, au goût québécois, variées (pas deux fois la même protéine de suite). Maximum 6 étapes courtes par recette, 3 pour un déjeuner. Écris en français québécois.`;
 function pantryLines(){ return state.pantry.split("\n").map(s=>s.trim()).filter(Boolean); }
 
@@ -459,7 +465,9 @@ Réponds uniquement avec un objet JSON : {"groceries":[${GROC_SHAPE}],"pantry_us
 }
 function cleanMeals(arr){ return arr.map((m,i)=>({id:"m"+Date.now().toString(36)+i+Math.random().toString(36).slice(2,5),
   day:Math.max(0,Math.min(6,+m.day||0)), type:TYPES[m.type]?m.type:"souper", name:String(m.name||"Repas"), en:String(m.en||"").slice(0,60), cat:IMG_CAT[m.cat]?m.cat:"", time:+m.time||0, cost:+m.cost||0,
-  ingredients:(m.ingredients||[]).map(String), steps:(m.steps||[]).map(String)})); }
+  ingredients:(m.ingredients||[]).map(String), steps:(m.steps||[]).map(String), nutrition:cleanNutri(m.nutrition)})); }
+function cleanNutri(n){ if(!n||typeof n!=="object"||!(+n.kcal>0)) return null; const o={}; for(const k of ["kcal","proteines","glucides","lipides","gras_sat","sucres","fibres","sodium"]) if(n[k]!=null&&isFinite(+n[k])) o[k]=Math.round(+n[k]*10)/10; return o; }
+function nutriOf(m){ if(m.nutrition) return m.nutrition; if(/^restes/i.test(m.name)){ const s = state.plan.meals.find(x=>x.type==="souper" && x.day===m.day-1); return s?.nutrition||null; } return null; }
 function cleanGroc(arr){ return arr.map(g=>({item:String(g.item||"?"), en:String(g.en||"").slice(0,50), qty:String(g.qty||""), aisle:AISLES.includes(g.aisle)?g.aisle:"Autre",
   store:state.settings.stores.includes(g.store)?g.store:(state.settings.stores[0]||"Maxi"), price:+g.price||0,
   src:g.src?String(g.src).slice(0,140):"", real:!!g.real, sale:!!g.sale})); }
@@ -549,12 +557,14 @@ function progressBox(){
 function viewMenu(){
   const p = state.plan, out = [];
   if(p.resume) out.push(el("p",{class:"muted",style:"margin:0"},p.resume));
+  const missing = p.meals.filter(m=>!nutriOf(m) && m.ingredients.length);
+  if(missing.length && !p.isExample) out.push(el("div",{class:"row"}, el("button",{class:"btn small",type:"button",disabled:!sample||!!busy,onclick:computeNutrition},"Calculer les valeurs nutritives"), el("span",{class:"muted",style:"font-size:13px"},`${missing.length} repas sans valeurs nutritives`)));
   const days = [...new Set(p.meals.map(m=>m.day))].sort((a,b)=>a-b);
   for(const d of days){
     const meals = p.meals.filter(m=>m.day===d).sort((a,b)=>TYPE_ORDER.indexOf(a.type)-TYPE_ORDER.indexOf(b.type));
-    const dayCost = meals.reduce((s,m)=>s+m.cost,0);
+    const dayCost = meals.reduce((s,m)=>s+m.cost,0), dayKcal = meals.reduce((s,m)=>s+(nutriOf(m)?.kcal||0),0);
     out.push(el("section",{class:"day"},
-      el("div",{class:"day-head"}, el("h2",{},DAYS[d]), el("span",{class:"mono"},money.format(dayCost))),
+      el("div",{class:"day-head"}, el("h2",{},DAYS[d]), el("span",{class:"mono"}, dayKcal?`${Math.round(dayKcal)} kcal · `:"", money.format(dayCost))),
       meals.map(mealCard)));
   }
   if(p.pantry_used?.length) out.push(el("div",{class:"card"}, el("h3",{},"Pris dans ton garde-manger"), el("div",{class:"pills"},p.pantry_used.map(x=>el("span",{},x)))));
@@ -569,6 +579,13 @@ function mealCard(m){
          : el("summary",{}, imgSlot("thumb", m.name, ()=>mealPick(m), m), name, price));
   d.addEventListener("toggle",()=>{ ui.open[m.id]=d.open; });
   const body = el("div",{class:"recipe"});
+  const n = nutriOf(m);
+  if(n) body.append(el("div",{}, el("h4",{},"Valeurs nutritives, par portion (estimées)"),
+    el("div",{class:"nutri"}, [["kcal","Calories",""],["proteines","Protéines"," g"],["glucides","Glucides"," g"],["lipides","Lipides"," g"],["fibres","Fibres"," g"],["sodium","Sodium"," mg"]]
+      .filter(([k])=>n[k]!=null).map(([k,l,u])=>el("div",{}, el("b",{},`${Math.round(n[k])}${u}`), el("span",{},l)))),
+    healthAvailable() ? el("div",{class:"row",style:"margin-top:8px"},
+      el("button",{class:"btn small"+(m.logged?"":" primary"),type:"button",onclick:()=>sendToHealth(m)}, m.logged?"Renvoyer à Samsung Health":"J'ai mangé ce repas → Samsung Health"),
+      m.logged?el("span",{class:"muted",style:"font-size:12px"},`Envoyé le ${new Date(m.logged).toLocaleString("fr-CA",{weekday:"short",hour:"2-digit",minute:"2-digit"})}`):null) : null));
   if(!leftover){
     body.append(el("div",{}, el("h4",{},"Ingrédients"), el("ul",{}, m.ingredients.map(i=>el("li",{},i)))));
     if(m.steps.length) body.append(el("div",{}, el("h4",{},"Étapes"), el("ol",{}, m.steps.map(s=>el("li",{},s)))));
@@ -679,7 +696,7 @@ function viewSettings(){
   goal.addEventListener("change",()=>{ s.goal=goal.value; save(); });
   const days = el("select",{id:"days"}, [5,6,7].map(n=>el("option",{value:n,selected:n===s.days},`${n} jours`)));
   days.addEventListener("change",()=>{ s.days=+days.value; save(); });
-  return [ apiCard(),
+  return [ apiCard(), healthCard(),
     el("div",{class:"card"}, el("h3",{},"Ménage et budget"),
       el("div",{class:"grid2"}, num("people","Personnes",s.people,{min:1,max:12}), num("budget","Budget par semaine ($)",s.budget,{min:20,step:5}),
         el("div",{class:"field"},el("label",{for:"days"},"Durée du menu"),days), num("maxTime","Temps max souper (min)",s.maxTime,{min:10,step:5},"Préparation active, en semaine"))),
@@ -810,9 +827,49 @@ async function loadSaved(){
 function persist(){ const s = JSON.stringify(state); try{ Prefs?.set({key:"popote", value:s}); }catch{} }
 
 /* Exact photos from TheMealDB (online), cached on the meal */
+/* Nutrition: fill missing values, and send a portion to Health Connect (Samsung Health syncs from it) */
+async function computeNutrition(){
+  if(!sample||busy) return;
+  const list = state.plan.meals.filter(m=>!m.nutrition && m.ingredients.length).map(m=>({id:m.id, plat:m.name, portions:state.settings.people, ingredients:m.ingredients}));
+  if(!list.length) return;
+  const prompt = `Calcule les valeurs nutritives estimées d'UNE portion pour chacun de ces repas (le total des ingrédients divisé par le nombre de portions).
+${JSON.stringify(list)}
+Réponds uniquement avec un objet JSON : {"repas":[{"id":"...","nutrition":{"kcal":550,"proteines":35,"glucides":50,"lipides":20,"gras_sat":6,"sucres":8,"fibres":6,"sodium":800}}]} (grammes, sauf sodium en mg).`;
+  await run("Claude calcule les valeurs nutritives", prompt, data => {
+    const byId = new Map((data?.repas||[]).map(r=>[String(r.id), cleanNutri(r.nutrition)]));
+    for(const m of state.plan.meals){ const n = byId.get(m.id); if(n) m.nutrition = n; }
+    toast("Valeurs nutritives ajoutées");
+  }, {cache:false});
+}
+function healthAvailable(){ try{ return !!Cap?.isPluginAvailable?.("PopoteHealth"); }catch{ return false; } }
+async function sendToHealth(m){
+  const n = nutriOf(m); if(!n){ toast("Pas de valeurs nutritives pour ce repas"); return; }
+  const HC = Cap.Plugins.PopoteHealth;
+  try{
+    const st = await HC.status();
+    if(!st.available){ toast(st.needsUpdate ? "Mets à jour Health Connect dans le Play Store" : "Installe Health Connect pour envoyer à Samsung Health"); await HC.installHealthConnect(); return; }
+    if(!st.granted){ const r = await HC.requestPermission(); if(!r.granted){ toast("Permission refusée"); return; } }
+    await HC.writeMeal({name:m.name, mealType:m.type, start:Date.now()-30*60000, minutes:30, kcal:n.kcal, protein:n.proteines, carbs:n.glucides, fat:n.lipides, saturatedFat:n.gras_sat, sugar:n.sucres, fiber:n.fibres, sodiumMg:n.sodium});
+    m.logged = Date.now(); save(); render(); toast("Envoyé à Samsung Health");
+  }catch(e){ toast(e?.message || "Envoi impossible"); }
+}
+function healthCard(){
+  if(!healthAvailable()) return el("div",{class:"card"}, el("h3",{},"Samsung Health"), el("span",{class:"muted",style:"font-size:13px"},"Installe la nouvelle version de l'APK pour envoyer tes repas à Samsung Health."));
+  const s = el("span",{class:"muted",style:"font-size:13px"},"Vérification…");
+  Cap.Plugins.PopoteHealth.status().then(st=>{ s.textContent = !st.available ? "Health Connect n'est pas installé ou doit être mis à jour." : st.granted ? "Autorisé. Les repas envoyés apparaissent dans Samsung Health." : "Pas encore autorisé."; }).catch(()=>{ s.textContent = "Health Connect indisponible."; });
+  return el("div",{class:"card"}, el("h3",{},"Samsung Health"),
+    el("span",{class:"muted",style:"font-size:13px;margin-top:-8px"},"L'app écrit tes repas dans Health Connect. Dans Samsung Health : Réglages → Health Connect → autorise la lecture de la nutrition."),
+    s, el("div",{class:"row"}, el("button",{class:"btn",type:"button",onclick:async()=>{ try{ const st = await Cap.Plugins.PopoteHealth.status(); if(!st.available){ await Cap.Plugins.PopoteHealth.installHealthConnect(); return; } const r = await Cap.Plugins.PopoteHealth.requestPermission(); toast(r.granted?"Autorisé":"Permission refusée"); render(); }catch(e){ toast(e?.message||"Erreur"); } }},"Autoriser Health Connect")));
+}
 const PHOTO_V = 2;
-async function fetchMealPhoto(m){
-  if((m.photo!==undefined && m.pv===PHOTO_V) || !m.en) return;
+const photoPending = new Map();
+function fetchMealPhoto(m){
+  if(photoPending.has(m.id)) return photoPending.get(m.id);
+  if((m.photo!==undefined && m.pv===PHOTO_V) || !m.en) return Promise.resolve();
+  const p = fetchMealPhotoNow(m).finally(()=>photoPending.delete(m.id));
+  photoPending.set(m.id, p); return p;
+}
+async function fetchMealPhotoNow(m){
   m.photo = ""; m.pv = PHOTO_V; m.credit = null;
   try{
     const uk = cfg().unsplashKey, pk = cfg().pexelsKey;
